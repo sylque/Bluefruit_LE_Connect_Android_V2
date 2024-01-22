@@ -411,23 +411,31 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
         } catch (UnsupportedEncodingException ignored) {
         }*/
 
-        // Find last separator
-        boolean found = false;
-        int i = data.length - 1;
-        while (i >= 0 && !found) {
-            if (data[i] == kLineSeparator) {
-                found = true;
-            } else {
-                i--;
-            }
-        }
-        final int lastSeparator = i + 1;
+        // There is an issue with the original code: when opening the plotter, we might receive an
+        // incomplete line. For example, line "0.11111 0.22222 0.33333" might arrive as "11111
+        // 0.22222 0.33333", which will mess up with the Y scale. So we need to ensure we only take
+        // complete lines into consideration.
 
-        //
-        if (found) {
-            final byte[] subData = Arrays.copyOfRange(data, 0, lastSeparator);
+        // Convert byte array to string
+        final String dataStr = new String(data, StandardCharsets.UTF_8);
+
+        // Iterate over the data to find full lines (i.e. between two separators)
+        int lastPos = 0;
+        while(true) {
+            // Find first and last separators. This ensures any line is complete and any line with a
+            // missing beginning is ignored.
+            final int firstPos = dataStr.indexOf(kLineSeparator, lastPos);
+            if (firstPos == -1) {
+                break;
+            }
+            lastPos = dataStr.indexOf(kLineSeparator, firstPos + 1);
+            if (lastPos == -1) {
+                break;
+            }
+
+            // A full line has been found
             final float currentTimestamp = (System.currentTimeMillis() - mOriginTimestamp) / 1000.f;
-            final String dataString = new String(subData, StandardCharsets.UTF_8);
+            final String dataString = dataStr.substring(firstPos + 1, lastPos);
             //Log.d(TAG, "data: " + dataString);
 
             final String[] lineStrings = dataString.replace("\r", "").split("\n");
@@ -459,9 +467,9 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
                 mMainHandler.post(this::notifyDataSetChanged);
             }
 
+            mUartDataManager.removeRxCacheFirst(lastPos, peripheralIdentifier);
         }
 
-        mUartDataManager.removeRxCacheFirst(lastSeparator, peripheralIdentifier);
     }
 
     // endregion
