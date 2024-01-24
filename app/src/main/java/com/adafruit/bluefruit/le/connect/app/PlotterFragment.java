@@ -309,6 +309,20 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
 
         mChart.setNoDataTextColor(Color.BLACK);
         mChart.setNoDataText(getString(R.string.plotter_nodata));
+
+        // MPAndroidChart Documentation:
+        // https://weeklycoding.com/mpandroidchart-documentation/
+
+        // Hide the right axis
+        mChart.getAxisRight().setEnabled(false);
+
+        // Enable dynamic Y axis downscaling. See:
+        // https://stackoverflow.com/questions/31934301/how-to-continuously-update-y-axis-values-in-mpandroidchart
+        mChart.setAutoScaleMinMaxEnabled(true);
+
+        // Enable scrolling the chart. See:
+        // https://github.com/PhilJay/MPAndroidChart/wiki/Interaction-with-the-Chart
+        mChart.setDragEnabled(true);
     }
 
     private void setXMaxEntriesValue(int value) {
