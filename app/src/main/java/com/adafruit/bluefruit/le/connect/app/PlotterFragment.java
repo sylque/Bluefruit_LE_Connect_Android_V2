@@ -8,6 +8,8 @@ import android.bluetooth.BluetoothGatt;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
+import android.graphics.PorterDuff;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -16,6 +18,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresPermission;
 import androidx.appcompat.widget.SwitchCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
@@ -25,6 +28,7 @@ import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.SubMenu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.SeekBar;
@@ -45,7 +49,6 @@ import com.github.mikephil.charting.interfaces.datasets.ILineDataSet;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +75,8 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
     private final Map<String, List<LineDataSet>> mDataSetsForPeripheral = new HashMap<>();
     private LineDataSet mLastDataSetModified;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+
+    private SubMenu mSelectSubmenu;
 
     // region Fragment Lifecycle
     public static PlotterFragment newInstance(@Nullable String singlePeripheralIdentifier) {
@@ -179,7 +184,8 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
     @Override
     public void onCreateOptionsMenu(@NonNull Menu menu, @NonNull MenuInflater inflater) {
         super.onCreateOptionsMenu(menu, inflater);
-        inflater.inflate(R.menu.menu_help, menu);
+        inflater.inflate(R.menu.menu_plotter, menu);
+        mSelectSubmenu = menu.getItem(0).getSubMenu();
     }
 
     @Override
@@ -346,7 +352,7 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
         }
 
         if (!dataSetExists) {
-            appendDataset(peripheralIdentifier, entry, index);
+            LineDataSet dataSet = appendDataset(peripheralIdentifier, entry, index);
 
             List<ILineDataSet> allDataSets = new ArrayList<>();
             for (List<LineDataSet> dataSetLists : mDataSetsForPeripheral.values()) {
@@ -354,6 +360,35 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
             }
             final LineData lineData = new LineData(allDataSets);
             mChart.setData(lineData);
+
+            // Populate the data stream selection submenu with a new item
+            MenuItem item = mSelectSubmenu.add(0, Menu.NONE, index, "Stream " + (index+1));
+            item.setCheckable(true);
+            item.setChecked(true);
+            Drawable iconDrawable = ContextCompat.getDrawable(requireContext(), R.drawable.baseline_timeline_24);
+            iconDrawable.setColorFilter(allDataSets.get(index).getColor(), PorterDuff.Mode.SRC_IN);
+            item.setIcon(iconDrawable);
+
+            item.setOnMenuItemClickListener(item1 -> {
+                // Check the checkbox
+                item1.setChecked(!item1.isChecked());
+
+                // Show/hide the data line
+                dataSet.setVisible(item1.isChecked());
+                mChart.invalidate();
+
+                // Keep the popup menu open. See:
+                // https://stackoverflow.com/a/31727213/3567351
+                item1.setShowAsAction(MenuItem.SHOW_AS_ACTION_COLLAPSE_ACTION_VIEW);
+                item1.setActionView(new View(getContext()));
+                item1.setOnActionExpandListener(new MenuItem.OnActionExpandListener() {
+                    @Override
+                    public boolean onMenuItemActionExpand(MenuItem item1) { return false; }
+                    @Override
+                    public boolean onMenuItemActionCollapse(MenuItem item1) { return false; }
+                });
+                return false;
+            });
         }
 
         List<LineDataSet> dataSets2 = mDataSetsForPeripheral.get(peripheralIdentifier);
@@ -387,7 +422,7 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
         }
     }
 
-    private void appendDataset(@NonNull String peripheralIdentifier, @NonNull Entry entry, int index) {
+    private LineDataSet appendDataset(@NonNull String peripheralIdentifier, @NonNull Entry entry, int index) {
         LineDataSet dataSet = new LineDataSet(null, "Values[" + peripheralIdentifier + ":" + index + "]");
         dataSet.addEntry(entry);
         dataSet.addEntry(entry);
@@ -409,6 +444,8 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
             dataSets.add(dataSet);
             mDataSetsForPeripheral.put(peripheralIdentifier, dataSets);
         }
+
+        return dataSet;
     }
 
     // endregion
@@ -431,50 +468,52 @@ public class PlotterFragment extends ConnectedPeripheralFragment implements Uart
         // complete lines into consideration.
 
         // Convert byte array to string
-        final String dataStr = new String(data, StandardCharsets.UTF_8);
+        final String dataString = new String(data, StandardCharsets.UTF_8);
 
         // Iterate over the data to find full lines (i.e. between two separators)
         int lastPos = 0;
         while(true) {
             // Find first and last separators. This ensures any line is complete and any line with a
             // missing beginning is ignored.
-            final int firstPos = dataStr.indexOf(kLineSeparator, lastPos);
+            final int firstPos = dataString.indexOf(kLineSeparator, lastPos);
             if (firstPos == -1) {
                 break;
             }
-            lastPos = dataStr.indexOf(kLineSeparator, firstPos + 1);
+            lastPos = dataString.indexOf(kLineSeparator, firstPos + 1);
             if (lastPos == -1) {
                 break;
             }
 
             // A full line has been found
             final float currentTimestamp = (System.currentTimeMillis() - mOriginTimestamp) / 1000.f;
-            final String dataString = dataStr.substring(firstPos + 1, lastPos);
+            final String lineString = dataString.substring(firstPos + 1, lastPos);
             //Log.d(TAG, "data: " + dataString);
 
-            final String[] lineStrings = dataString.replace("\r", "").split("\n");
-            for (String lineString : lineStrings) {
-//                    Log.d(TAG, "line: " + lineString);
-                final String[] valuesStrings = lineString.split("[,; \t]");
+            // Is it a plotter labels line? A labels line is of the form "Labels:Label0,Label1,Label2"
+            final String LABELS_LINE_START = "Labels:";
+            if (lineString.startsWith(LABELS_LINE_START)) {
+                // Set the labels in the selection menu
+                final String labels = lineString.substring(LABELS_LINE_START.length());
                 int j = 0;
-                for (String valueString : valuesStrings) {
-                    boolean isValid = true;
-                    float value = 0;
-                    if (valueString != null) {
-                        try {
-                            value = Float.parseFloat(valueString);
-                        } catch (NumberFormatException ignored) {
-                            isValid = false;
-                        }
-                    } else {
-                        isValid = false;
+                for (String label : labels.split("[,; \t]")) {
+                    if (j < mSelectSubmenu.size()) {
+                        final MenuItem item = mSelectSubmenu.getItem(j);
+                        getActivity().runOnUiThread(() -> item.setTitle(label));
                     }
-
-                    if (isValid && peripheralIdentifier != null) {
-                        //Log.d(TAG, "value " + j + ": (" + currentTimestamp + ", " + value + ")");
-                        //Log.d(TAG, "value " + j + ": " + value);
-                        addEntry(peripheralIdentifier, j, value, currentTimestamp);
-                        j++;
+                    ++j;
+                }
+            } else {
+                // Add the float values
+                int j = 0;
+                for (String valueString : lineString.split("[,; \t]")) {
+                    try {
+                        final float value = Float.parseFloat(valueString);
+                        if (peripheralIdentifier != null) {
+                            //Log.d(TAG, "value " + j + ": (" + currentTimestamp + ", " + value + ")");
+                            //Log.d(TAG, "value " + j + ": " + value);
+                            addEntry(peripheralIdentifier, j++, value, currentTimestamp);
+                        }
+                    } catch (NumberFormatException ignored) {
                     }
                 }
 
