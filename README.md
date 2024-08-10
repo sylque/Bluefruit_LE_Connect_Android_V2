@@ -1,3 +1,9 @@
+*This fork has several fixes and improvements*:
+1. Graph setup: hide the right axis, enable dynamic Y axis downscaling, enable scrolling the chart
+2. Plotter: fix graph glitches at startup, due to bad processing of incomplete input lines
+3. Plotter: added a data stream selection menu to choose which streams to display (stream names can be customized using a special "Labels:" input line)
+4. Fixed graph scaling issue
+
 # Bluefruit_LE_Connect_Android_V2
 
 Android app for use with Bluefruit Bluetooth LE modules and dev boards from Adafruit.
